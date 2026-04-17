@@ -1,0 +1,145 @@
+{
+  "meta": {
+    "status": "ok",
+    "api_version": "39.1",
+    "verify_ssl": true
+  },
+  "provider_vdc": {
+    "vim_server": {
+      "name": "vcenter.example.com",
+      "id": "urn:vcloud:vimserver:ffffffff-ffff-ffff-ffff-ffffffffffff"
+    },
+    "nsxt_manager": {
+      "name": "nsx-t-mgmt.example.com",
+      "id": "urn:vcloud:nsxtmanager:ffffffff-ffff-ffff-ffff-ffffffffffff"
+    }
+  },
+  "capacity": {
+    "cpu": {
+      "units": "MHz",
+      "allocation": 8947200,
+      "reserved": 1504280,
+      "total": 2351563,
+      "used": 1504280,
+      "overhead": 0,
+      "total_reservation": 2351563
+    },
+    "cpu_converted": {
+      "allocation_mhz": 8947200,
+      "allocation_ghz": 8947.2,
+      "allocation_thz": 8.9472,
+      "reserved_mhz": 1504280,
+      "reserved_ghz": 1504.28,
+      "reserved_thz": 1.50428,
+      "total_mhz": 2351563,
+      "total_ghz": 2351.563,
+      "total_thz": 2.351563,
+      "used_mhz": 1504280,
+      "used_ghz": 1504.28,
+      "used_thz": 1.50428,
+      "overhead_mhz": 0,
+      "overhead_ghz": 0.0,
+      "overhead_thz": 0.0,
+      "total_reservation_mhz": 2351563,
+      "total_reservation_ghz": 2351.563,
+      "total_reservation_thz": 2.351563
+    },
+    "memory": {
+      "units": "MB",
+      "allocation": 8750592,
+      "reserved": 1541096,
+      "total": 13787767,
+      "used": 1633209,
+      "overhead": 89898,
+      "total_reservation": 13787767
+    },
+    "memory_converted": {
+      "allocation_mb": 8750592,
+      "allocation_tb": 8.3452,
+      "reserved_mb": 1541096,
+      "reserved_tb": 1.4697,
+      "total_mb": 13787767,
+      "total_tb": 13.149,
+      "used_mb": 1633209,
+      "used_tb": 1.5575,
+      "overhead_mb": 89898,
+      "overhead_tb": 0.0857,
+      "total_reservation_mb": 13787767,
+      "total_reservation_tb": 13.149
+    }
+  },
+  "ratios": {
+    "cpu_allocation_ratio": 3.804789,
+    "cpu_reservation_pressure": 0.639694,
+    "cpu_usage_ratio": 0.639694,
+    "memory_allocation_ratio": 0.634663,
+    "memory_reservation_pressure": 0.111773,
+    "memory_usage_ratio": 0.118453
+  },
+  "storage_by_policy": {
+    "policies": [
+      {
+        "storage_policy": "Bronze",
+        "org_vdc_profile_count": 47,
+        "storage_used_mb": 148435672,
+        "storage_used_gb": 144956.71,
+        "storage_used_tb": 141.5593,
+        "storage_limit_mb": 244857856,
+        "storage_limit_gb": 239119.0,
+        "storage_limit_tb": 233.5146,
+        "usage_ratio": 0.606212
+      },
+      {
+        "storage_policy": "Silver",
+        "org_vdc_profile_count": 36,
+        "storage_used_mb": 49888033,
+        "storage_used_gb": 48718.78,
+        "storage_used_tb": 47.5769,
+        "storage_limit_mb": 79583232,
+        "storage_limit_gb": 77718.0,
+        "storage_limit_tb": 75.8965,
+        "usage_ratio": 0.626866
+      },
+      {
+        "storage_policy": "Gold",
+        "org_vdc_profile_count": 45,
+        "storage_used_mb": 41036420,
+        "storage_used_gb": 40074.63,
+        "storage_used_tb": 39.1354,
+        "storage_limit_mb": 59038720,
+        "storage_limit_gb": 57655.0,
+        "storage_limit_tb": 56.3037,
+        "usage_ratio": 0.695076
+      }
+    ],
+    "summary": {
+      "policy_count": 3,
+      "org_vdc_profile_count": 128,
+      "storage_used_mb_total": 239360125,
+      "storage_used_gb_total": 233750.12,
+      "storage_used_tb_total": 228.2716,
+      "storage_limit_mb_total": 383479808,
+      "storage_limit_gb_total": 374492.0,
+      "storage_limit_tb_total": 365.7148,
+      "usage_ratio_total": 0.624179
+    }
+  },
+  "published_datastore_capacity": {
+    "datastore_count": 56,
+    "storage_mb_total": 1056950272,
+    "storage_used_mb_total": 369179236,
+    "provisioned_storage_mb_total": 378217780,
+    "requested_storage_mb_total": 237901116,
+    "storage_gb_total": 1032178.0,
+    "storage_tb_total": 1007.9863,
+    "storage_used_gb_total": 360526.6,
+    "storage_used_tb_total": 352.0768,
+    "provisioned_storage_gb_total": 369353.3,
+    "provisioned_storage_tb_total": 360.6966,
+    "requested_storage_gb_total": 232325.31,
+    "requested_storage_tb_total": 226.8802,
+    "used_ratio": 0.349287,
+    "provisioned_ratio": 0.357839,
+    "requested_ratio": 0.225083
+  }
+}
