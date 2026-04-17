@@ -3,6 +3,8 @@
 Cкрипт для активного мониторинга S3-совместимого хранилища через S3 API.
 Предназначен для запуска из командной строки, систем мониторинга (в частности, Zabbix) или ручной диагностики.  
 
+---
+
 ## Что делает
 Последовательно выполняет несколько проверок:
 1. Проверяет доступность S3 API.
@@ -14,11 +16,36 @@ Cкрипт для активного мониторинга S3-совмести
 7. Опционально удаляет загруженные тестовые объекты.
 8. Возвращает результат в JSON и выставляет exit code, удобный для интеграции с Zabbix.
 
+---
+
 ## Для каких задач
 - Мониторинг S3-compatible storage из Zabbix через external check или UserParameter.
 - Проверка работоспособности MinIO, Ceph RGW и других S3-совместимых решений.
 - Контроль не только доступности API, но и реального выполнения операций чтения/записи.
 - Оценка деградации производительности upload/download.
+
+---
+
+## Формат запуска
+
+```bash
+./S3-Sentinel.py <endpoint> <access_key> <secret_key> <bucket>
+```
+
+Пример:
+
+```bash
+./S3-Sentinel.py s3.example.local:9000 ACCESS_KEY SECRET_KEY backup-bucket
+```
+
+## Аргументы
+
+- `endpoint` — адрес S3 endpoint в формате `host` или `host:port`
+- `access_key` — S3 access key
+- `secret_key` — S3 secret key
+- `bucket` — имя бакета для проверки
+
+---
 
 ## Логика проверок
 ### 1. Connectivity check
@@ -67,24 +94,7 @@ list_objects_v2(Bucket=<bucket>, MaxKeys=1)
 - по завершении удаляет загруженные объекты из бакета;
 - затем удаляет локальный временный файл.
 
-## Формат запуска
-
-```bash
-./S3-Sentinel.py <endpoint> <access_key> <secret_key> <bucket>
-```
-
-Пример:
-
-```bash
-./S3-Sentinel.py s3.example.local:9000 ACCESS_KEY SECRET_KEY backup-bucket
-```
-
-## Аргументы
-
-- `endpoint` — адрес S3 endpoint в формате `host` или `host:port`
-- `access_key` — S3 access key
-- `secret_key` — S3 secret key
-- `bucket` — имя бакета для проверки
+---
 
 ## Пример JSON-ответа
 
@@ -141,6 +151,7 @@ list_objects_v2(Bucket=<bucket>, MaxKeys=1)
   }
 }
 ```
+---
 
 ## Что требуется подготовить заранее
 

@@ -4,6 +4,7 @@
 Подключается к API vCloud Director, получает данные по вычислительным ресурсам и storage, рассчитывает коэффициенты использования и формирует итоговый JSON-отчет.
 
 ---
+
 ## Сценарии применения
 
 Скрипт может быть полезен в следующих случаях:
@@ -29,6 +30,7 @@
 
 ### 3. Скрипт рассчитан на доступность конкретных API VCD
 Если в вашей версии VMware Cloud Director изменены API-поля или поведение endpoint, может потребоваться доработка парсинга.
+
 ---
 
 ## Параметры запуска
@@ -44,8 +46,6 @@ URL VMware Cloud Director.
 --vcd-url https://vcd.example.com
 ```
 
----
-
 #### `--vcd-api-token`
 API token (refresh token), который используется для получения access token.
 
@@ -54,8 +54,6 @@ API token (refresh token), который используется для пол
 ```bash
 --vcd-api-token eyJhbGciOi...
 ```
-
----
 
 ### Необязательные параметры
 
@@ -79,8 +77,6 @@ API token (refresh token), который используется для пол
 --verify-ssl false
 ```
 
----
-
 #### `--api-version`
 Версия API VMware Cloud Director.
 
@@ -96,8 +92,6 @@ API token (refresh token), который используется для пол
 --api-version 39.1
 ```
 
----
-
 #### `--pvdc-name`
 Имя Provider VDC, по которому нужно строить отчёт.
 
@@ -108,8 +102,6 @@ API token (refresh token), который используется для пол
 ```bash
 --pvdc-name ProviderVDC-01
 ```
-
----
 
 #### `--output-file`
 Путь к файлу, в который нужно сохранить JSON-отчёт.
@@ -123,7 +115,6 @@ API token (refresh token), который используется для пол
 ---
 
 ## Примеры запуска
-
 ### Простейший запуск
 
 ```bash
@@ -131,8 +122,6 @@ python3 vcd_pvdc_capacity_reporter.py \
   --vcd-url https://vcd.example.com \
   --vcd-api-token YOUR_REFRESH_TOKEN
 ```
-
----
 
 ### Запуск с выбором конкретного Provider VDC
 
@@ -143,8 +132,6 @@ python3 vcd_pvdc_capacity_reporter.py \
   --pvdc-name ProviderVDC-01
 ```
 
----
-
 ### Запуск без проверки SSL
 
 ```bash
@@ -153,8 +140,6 @@ python3 vcd_pvdc_capacity_reporter.py \
   --vcd-api-token YOUR_REFRESH_TOKEN \
   --verify-ssl false
 ```
-
----
 
 ### Запуск с сохранением результата в файл
 
@@ -214,16 +199,12 @@ python3 vcd_pvdc_capacity_reporter.py \
 - сетевую связность;
 - SSL-сертификат.
 
----
-
 ### Ошибка: `Authentication succeeded but access_token is missing`
 Проверьте:
 
 - действительно ли передан корректный refresh token;
 - не изменился ли формат ответа API;
 - не ограничены ли права текущего пользователя.
-
----
 
 ### Ошибка: `Provider VDC named '...' not found`
 Проверьте:
@@ -232,16 +213,12 @@ python3 vcd_pvdc_capacity_reporter.py \
 - регистр символов;
 - права на просмотр данного объекта.
 
----
-
 ### Ошибка парсинга XML
 Проверьте:
 
 - что endpoint действительно возвращает XML;
 - что версия API совместима;
 - что ответ API не содержит HTML-страницу ошибки вместо XML.
-
----
 
 ### Пустые или `null` значения в ratios
 Это возможно, если:
