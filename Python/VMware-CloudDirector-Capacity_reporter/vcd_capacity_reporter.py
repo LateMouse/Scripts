@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
+import re
 import sys
 from collections import defaultdict
 import requests
 import xml.etree.ElementTree as ET
-
 
 # Пространство имен XML, которые используются при поиске XML-элементов в ответах vCloud Director.
 # Без них методы find/findall/findtext не смогут корректно найти узлы в XML.
@@ -14,7 +15,6 @@ NS = {
     "vmext": "http://www.vmware.com/vcloud/extension/v1.5",
 }
 
-
 # class CollectorError:
 #   Тип исключения для контролируемых ошибок коллектора.
 #   позволяет отделить ожидаемые ошибки бизнес-логики и интеграции от непредвиденных системных ошибок;
@@ -22,7 +22,6 @@ NS = {
 #   Используется почти во всех функциях, где возможна контролируемая ошибка. Перехватывается в main() для вывода сообщения.
 class CollectorError(Exception):
     pass
-
 
 # str_to_bool:
 #   Преобразует строковое значение в булево:
@@ -40,7 +39,6 @@ def str_to_bool(value):
         return False
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
-
 # safe_int
 #   Преобразует значение в int.
 #   - если значение отсутствует, возвращает default;
@@ -56,10 +54,9 @@ def safe_int(value, default=None):
     if value is None:
         return default
     try:
-        return int(str(value).strip())
+        return int(float(str(value).strip()))
     except (ValueError, TypeError):
         return default
-
 
 # safe_float_div
 #   Защита от деления на ноль;
@@ -76,7 +73,6 @@ def safe_float_div(numerator, denominator, precision=6):
         return None
     return round(numerator / denominator, precision)
 
-
 # mb_to_gb
 #   Переводит мегабайты в гигабайты:
 #   Используется в агрегатах storage и при формировании метрик.
@@ -84,7 +80,6 @@ def mb_to_gb(value_mb):
     if value_mb is None:
         return None
     return round(value_mb / 1024, 2)
-
 
 # mb_to_gb
 #   Переводит мегабайты в терабайты:
@@ -94,7 +89,6 @@ def mb_to_tb(value_mb):
         return None
     return round(value_mb / 1024 / 1024, 4)
 
-
 # mhz_to_ghz
 #   Переводит MHz в GHz.
 #   Используется в build_cpu_converted() для представления CPU-метрик.
@@ -103,7 +97,6 @@ def mhz_to_ghz(value_mhz):
         return None
     return round(value_mhz / 1000, 6)
 
-
 # mhz_to_thz
 #   Переводит MHz в THz.
 #   Используется в build_cpu_converted() для представления CPU-метрик.
@@ -111,7 +104,6 @@ def mhz_to_thz(value_mhz):
     if value_mhz is None:
         return None
     return round(value_mhz / 1000000, 9)
-
 
 # build_cpu_converted
 #   Строит расширенный словарь CPU-метрик.
@@ -168,13 +160,65 @@ def build_memory_converted(mem):
         "total_reservation_tb": mb_to_tb(mem.get("total_reservation")),
     }
 
+# first_non_empty
+#   Возвращает первое непустое значение из списка кандидатов.
+#   Важная склейка между разными форматами XML:
+#   один и тот же атрибут может лежать:
+#   - в тексте XML-элемента,
+#   - в атрибуте XML-узла,
+#   - в namespace vcloud,
+#   - в namespace vmext.
+#
+#   parse_provider_vdc_storage_profile_xml() активно использует эту функцию,
+#   чтобы не быть жестко привязанным к одному варианту структуры.
+def first_non_empty(*values):
+    for value in values:
+        if value is None:
+            continue
+        s = str(value).strip()
+        if s != "":
+            return s
+    return None
+
+# node_bool
+#   Преобразует текстовое значение из XML в bool.
+#
+#   Отличие от str_to_bool():
+#       - str_to_bool() предназначен для CLI и бросает ошибку на плохом вводе;
+#       - node_bool() предназначен для данных API и в сомнительном случае возвращает None.
+#
+#   Это отражает разную семантику:
+#       CLI должен быть валидным,
+#       а XML-ответ просто может быть неполным или неожиданным.
+def node_bool(value):
+    if value is None:
+        return None
+    value = str(value).strip().lower()
+    if value in ("true", "1", "yes", "y", "on"):
+        return True
+    if value in ("false", "0", "no", "n", "off"):
+        return False
+    return None
+
+# sanitize_filename
+#   Связь с dump_provider_storage_profile_xml():
+#   значения profile_name и profile_id приходят из API,
+#   поэтому перед использованием в имени файла их нужно очистить.
+def sanitize_filename(value):
+    if value is None:
+        return "unnamed"
+    value = str(value).strip()
+    if not value:
+        return "unnamed"
+    value = re.sub(r"[^A-Za-z0-9._-]+", "_", value)
+    return value[:200]
+
 # VCDClient:
 #   Клиент для работы с API vCloud Director:
 #   - хранит параметры подключения;
 #   - управляет HTTP-сессией requests;
 #   - аутентификация;
 #   - GET-запросы к JSON и XML API VCD.
-
 class VCDClient:
 
     # __init__:    
@@ -320,6 +364,33 @@ def parse_xml_root(xml_text, context):
     except ET.ParseError as exc:
         raise CollectorError(f"Failed to parse XML for {context}: {exc}") from exc
 
+# xml_text_any
+#   Ищет первый непустой атрибут по списку имен.
+#
+#   В связке с xml_text_any() позволяет парсеру быть "двухрежимным":
+#   сначала искать значения как XML-элементы, потом как XML-атрибуты
+def xml_text_any(node, paths):
+    for path in paths:
+        value = node.findtext(path, default=None, namespaces=NS)
+        if value is not None and str(value).strip() != "":
+            return value
+    return None
+
+# xml_attr_any
+#   Унифицированный парсер блока capacity (CPU или Memory).
+#
+#   один из ключевых примеров переиспользования:
+#   структура CPU и Memory в admin XML одинакова,
+#   поэтому одна функция обслуживает оба случая.
+#
+#   Благодаря этому parse_provider_vdc_admin_xml() не дублирует логику.
+def xml_attr_any(node, attr_names):
+    for attr in attr_names:
+        value = node.attrib.get(attr)
+        if value is not None and str(value).strip() != "":
+            return value
+    return None
+
 # parse_capacity_block:
 # Разбирает один блок capacity из XML CPU или Memory из секции ComputeCapacity. Извлекаем:
 #   - units
@@ -344,6 +415,92 @@ def parse_capacity_block(node):
         "overhead": safe_int(node.findtext("vcloud:Overhead", default=None, namespaces=NS)),
         "total_reservation": safe_int(node.findtext("vcloud:TotalReservation", default=None, namespaces=NS)),
     }
+
+# parse_provider_vdc_storage_profile_xml
+#   Разбирает XML отдельного Provider VDC storage profile.
+#
+#   - parse_provider_vdc_admin_xml() дает список storage profile "ссылок" (имя, href, id);
+#   - дальше по каждому href делается отдельный GET XML;
+#   - уже этот XML парсится здесь для получения емкости, usage, IOPS.
+#
+#   То есть admin XML даёт "каркас" профилей,
+#   а этот парсер извлекает их детальные метрики.
+def parse_provider_vdc_storage_profile_xml(xml_text):
+    root = parse_xml_root(xml_text, "Provider VDC storage profile")
+
+    enabled_raw = first_non_empty(
+        xml_text_any(root, [
+            ".//vcloud:Enabled",
+            ".//vmext:Enabled",
+        ]),
+        xml_attr_any(root, [
+            "enabled",
+        ])
+    )
+
+    units_raw = first_non_empty(
+        xml_text_any(root, [
+            ".//vcloud:Units",
+            ".//vmext:Units",
+        ]),
+        xml_attr_any(root, [
+            "units",
+        ])
+    )
+
+    capacity_total_raw = first_non_empty(
+        xml_text_any(root, [
+            ".//vcloud:CapacityTotal",
+            ".//vmext:CapacityTotal",
+        ]),
+        xml_attr_any(root, [
+            "capacityTotal",
+        ])
+    )
+
+    capacity_used_raw = first_non_empty(
+        xml_text_any(root, [
+            ".//vcloud:CapacityUsed",
+            ".//vmext:CapacityUsed",
+        ]),
+        xml_attr_any(root, [
+            "capacityUsed",
+        ])
+    )
+
+    iops_capacity_raw = first_non_empty(
+        xml_text_any(root, [
+            ".//vcloud:IopsCapacity",
+            ".//vmext:IopsCapacity",
+        ]),
+        xml_attr_any(root, [
+            "iopsCapacity",
+        ])
+    )
+
+    iops_allocated_raw = first_non_empty(
+        xml_text_any(root, [
+            ".//vcloud:IopsAllocated",
+            ".//vmext:IopsAllocated",
+        ]),
+        xml_attr_any(root, [
+            "iopsAllocated",
+        ])
+    )
+
+    return {
+        "id": first_non_empty(root.attrib.get("id")),
+        "name": first_non_empty(root.attrib.get("name")),
+        "href": first_non_empty(root.attrib.get("href")),
+        "enabled": node_bool(enabled_raw),
+        "default": None,
+        "units": units_raw,
+        "capacity_total_mb": safe_int(capacity_total_raw),
+        "capacity_used_mb": safe_int(capacity_used_raw),
+        "iops_capacity": safe_int(iops_capacity_raw),
+        "iops_allocated": safe_int(iops_allocated_raw),
+    }
+
 
 # parse_provider_vdc_admin_xml
 # Разбирает XML admin-представления Provider VDC:
@@ -421,7 +578,7 @@ def parse_query_result_records(xml_text):
 #   - продолжает запрашивать страницы, пока не будут собраны все записи.
 # VCD query API редко возвращает все данные одной страницей. Функция скрывает от остального кода всю логику постраничного обхода.
 # Используется в build_pvdc_report() для получения записей по storage profiles и datastores.
-def query_all_records(client, query_type, page_size=128):
+def query_all_records(client, query_type, page_size=128, filter_expr=None):
     all_records = []
     page = 1
 
@@ -432,6 +589,8 @@ def query_all_records(client, query_type, page_size=128):
             "page": page,
             "pageSize": page_size,
         }
+        if filter_expr:
+            params["filter"] = filter_expr
 
         parsed = parse_query_result_records(client.get_xml("/api/query", params=params))
         batch = parsed["records"]
@@ -480,35 +639,166 @@ def aggregate_admin_org_vdc_storage_profiles(records):
     for policy_name, data in by_policy.items():
         used_mb = data["storage_used_mb"]
         limit_mb = data["storage_limit_mb"]
+
         policies.append({
             "storage_policy": policy_name,
             "org_vdc_profile_count": data["org_vdc_profile_count"],
-            "storage_used_mb": used_mb,
-            "storage_used_gb": mb_to_gb(used_mb),
-            "storage_used_tb": mb_to_tb(used_mb),
-            "storage_limit_mb": limit_mb,
-            "storage_limit_gb": mb_to_gb(limit_mb),
-            "storage_limit_tb": mb_to_tb(limit_mb),
-            "usage_ratio": safe_float_div(used_mb, limit_mb),
+            "tenant_storage_used_mb": used_mb,
+            "tenant_storage_used_gb": mb_to_gb(used_mb),
+            "tenant_storage_used_tb": mb_to_tb(used_mb),
+            "tenant_storage_limit_mb": limit_mb,
+            "tenant_storage_limit_gb": mb_to_gb(limit_mb),
+            "tenant_storage_limit_tb": mb_to_tb(limit_mb),
+            "tenant_usage_ratio": safe_float_div(used_mb, limit_mb),
         })
 
-    policies.sort(key=lambda x: x["storage_used_mb"], reverse=True)
+    policies.sort(key=lambda x: x["tenant_storage_used_mb"], reverse=True)
 
-    total_used_mb = sum(x["storage_used_mb"] for x in policies)
-    total_limit_mb = sum(x["storage_limit_mb"] for x in policies)
+    total_used_mb = sum(x["tenant_storage_used_mb"] for x in policies)
+    total_limit_mb = sum(x["tenant_storage_limit_mb"] for x in policies)
 
     return {
         "policies": policies,
         "summary": {
             "policy_count": len(policies),
             "org_vdc_profile_count": sum(x["org_vdc_profile_count"] for x in policies),
-            "storage_used_mb_total": total_used_mb,
-            "storage_used_gb_total": mb_to_gb(total_used_mb),
-            "storage_used_tb_total": mb_to_tb(total_used_mb),
-            "storage_limit_mb_total": total_limit_mb,
-            "storage_limit_gb_total": mb_to_gb(total_limit_mb),
-            "storage_limit_tb_total": mb_to_tb(total_limit_mb),
-            "usage_ratio_total": safe_float_div(total_used_mb, total_limit_mb),
+            "tenant_storage_used_mb_total": total_used_mb,
+            "tenant_storage_used_gb_total": mb_to_gb(total_used_mb),
+            "tenant_storage_used_tb_total": mb_to_tb(total_used_mb),
+            "tenant_storage_limit_mb_total": total_limit_mb,
+            "tenant_storage_limit_gb_total": mb_to_gb(total_limit_mb),
+            "tenant_storage_limit_tb_total": mb_to_tb(total_limit_mb),
+            "tenant_usage_ratio_total": safe_float_div(total_used_mb, total_limit_mb),
+        },
+    }
+
+# aggregate_provider_storage_profiles
+#   Агрегирует provider-side view по storage policy.
+#
+#    Здесь происходит сшивание двух источников:
+#   1) admin_storage_profiles -> список профилей из PVDC admin XML;
+#   2) detailed_profiles -> подробности, полученные отдельными GET по href.
+#
+#   Таким образом, admin XML дает перечень сущностей,
+#   а detailed XML дает метрики этих сущностей.
+def aggregate_provider_storage_profiles(admin_storage_profiles, detailed_profiles):
+    detailed_by_name = {}
+    for item in detailed_profiles:
+        name = item.get("name")
+        if name:
+            detailed_by_name[name] = item
+
+    policies = []
+    for admin_sp in admin_storage_profiles:
+        name = admin_sp.get("name") or "UNKNOWN"
+        detailed = detailed_by_name.get(name, {})
+
+        capacity_total_mb = detailed.get("capacity_total_mb")
+        capacity_used_mb = detailed.get("capacity_used_mb")
+        iops_capacity = detailed.get("iops_capacity")
+        iops_allocated = detailed.get("iops_allocated")
+
+        policies.append({
+            "storage_policy": name,
+            "provider_storage_capacity_mb": capacity_total_mb,
+            "provider_storage_capacity_gb": mb_to_gb(capacity_total_mb),
+            "provider_storage_capacity_tb": mb_to_tb(capacity_total_mb),
+            "provider_storage_used_mb": capacity_used_mb,
+            "provider_storage_used_gb": mb_to_gb(capacity_used_mb),
+            "provider_storage_used_tb": mb_to_tb(capacity_used_mb),
+            "provider_usage_ratio": safe_float_div(capacity_used_mb, capacity_total_mb),
+            "iops_capacity": iops_capacity,
+            "iops_allocated": iops_allocated,
+        })
+
+     # Сначала политики с известной capacity, затем по убыванию capacity.
+    policies.sort(key=lambda x: (x["provider_storage_capacity_mb"] is None, -(x["provider_storage_capacity_mb"] or 0)))
+
+    total_capacity_mb = sum((x["provider_storage_capacity_mb"] or 0) for x in policies)
+    total_used_mb = sum((x["provider_storage_used_mb"] or 0) for x in policies)
+
+    return {
+        "policies": policies,
+        "summary": {
+            "policy_count": len(policies),
+            "provider_storage_capacity_mb_total": total_capacity_mb,
+            "provider_storage_capacity_gb_total": mb_to_gb(total_capacity_mb),
+            "provider_storage_capacity_tb_total": mb_to_tb(total_capacity_mb),
+            "provider_storage_used_mb_total": total_used_mb,
+            "provider_storage_used_gb_total": mb_to_gb(total_used_mb),
+            "provider_storage_used_tb_total": mb_to_tb(total_used_mb),
+            "provider_usage_ratio_total": safe_float_div(total_used_mb, total_capacity_mb),
+        },
+    }
+
+# merge_storage_views
+#   Объединяет tenant_view и provider_view в единую merged_view.
+#
+#   Соединяет два разных взгляда на одну и ту же storage policy:
+#   - сколько заняли и какой лимит виден арендаторам;
+#   - какая реальная provider capacity есть под этой политикой.
+#
+#   Именно здесь появляются cross-layer коэффициенты,
+#   которых нельзя было получить ни из tenant_agg, ни из provider_agg по отдельности.
+def merge_storage_views(tenant_agg, provider_agg):
+    provider_by_name = {
+        x["storage_policy"]: x for x in provider_agg.get("policies", [])
+    }
+    tenant_by_name = {
+        x["storage_policy"]: x for x in tenant_agg.get("policies", [])
+    }
+
+    all_names = sorted(set(provider_by_name.keys()) | set(tenant_by_name.keys()))
+
+    merged = []
+    for name in all_names:
+        tenant = tenant_by_name.get(name, {})
+        provider = provider_by_name.get(name, {})
+
+        tenant_used_mb = tenant.get("tenant_storage_used_mb")
+        tenant_limit_mb = tenant.get("tenant_storage_limit_mb")
+        provider_capacity_mb = provider.get("provider_storage_capacity_mb")
+
+        merged.append({
+            "storage_policy": name,
+            "org_vdc_profile_count": tenant.get("org_vdc_profile_count"),
+            "tenant_storage_used_mb": tenant_used_mb,
+            "tenant_storage_used_gb": mb_to_gb(tenant_used_mb),
+            "tenant_storage_used_tb": mb_to_tb(tenant_used_mb),
+            "tenant_storage_limit_mb": tenant_limit_mb,
+            "tenant_storage_limit_gb": mb_to_gb(tenant_limit_mb),
+            "tenant_storage_limit_tb": mb_to_tb(tenant_limit_mb),
+            "provider_storage_capacity_mb": provider_capacity_mb,
+            "provider_storage_capacity_gb": mb_to_gb(provider_capacity_mb),
+            "provider_storage_capacity_tb": mb_to_tb(provider_capacity_mb),
+            "tenant_usage_ratio": safe_float_div(tenant_used_mb, tenant_limit_mb),
+            "provider_consumption_ratio": safe_float_div(tenant_used_mb, provider_capacity_mb),
+            "tenant_limit_vs_provider_ratio": safe_float_div(tenant_limit_mb, provider_capacity_mb),
+        })
+
+    total_tenant_used_mb = sum((x.get("tenant_storage_used_mb") or 0) for x in merged)
+    total_tenant_limit_mb = sum((x.get("tenant_storage_limit_mb") or 0) for x in merged)
+    total_provider_capacity_mb = sum((x.get("provider_storage_capacity_mb") or 0) for x in merged)
+
+    return {
+        "policies": merged,
+        "summary": {
+            "policy_count": len(merged),
+            "tenant_storage_used_mb_total": total_tenant_used_mb,
+            "tenant_storage_used_gb_total": mb_to_gb(total_tenant_used_mb),
+            "tenant_storage_used_tb_total": mb_to_tb(total_tenant_used_mb),
+            "tenant_storage_limit_mb_total": total_tenant_limit_mb,
+            "tenant_storage_limit_gb_total": mb_to_gb(total_tenant_limit_mb),
+            "tenant_storage_limit_tb_total": mb_to_tb(total_tenant_limit_mb),
+            "provider_storage_capacity_mb_total": total_provider_capacity_mb,
+            "provider_storage_capacity_gb_total": mb_to_gb(total_provider_capacity_mb),
+            "provider_storage_capacity_tb_total": mb_to_tb(total_provider_capacity_mb),
+            "tenant_used_vs_provider_capacity_ratio_total": safe_float_div(
+                total_tenant_used_mb, total_provider_capacity_mb
+            ),
+            "tenant_limit_vs_provider_capacity_ratio_total": safe_float_div(
+                total_tenant_limit_mb, total_provider_capacity_mb
+            ),
         },
     }
 
@@ -557,6 +847,27 @@ def aggregate_datastores(records):
 
     return totals
 
+# dump_provider_storage_profile_xml
+#   При необходимости сохраняет сырой XML storage profile на диск.
+#
+#   Это вспомогательная отладочная ветка.
+#   Она не влияет на вычисление итогового отчета, но помогает анализировать, почему 
+#   parse_provider_vdc_storage_profile_xml() не смог извлечь нужные поля.
+def dump_provider_storage_profile_xml(dump_dir, profile_name, profile_id, xml_text):
+    if not dump_dir:
+        return None
+
+    os.makedirs(dump_dir, exist_ok=True)
+    safe_name = sanitize_filename(profile_name)
+    safe_id = sanitize_filename(profile_id)
+    filename = f"{safe_name}__{safe_id}.xml"
+    path = os.path.join(dump_dir, filename)
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(xml_text)
+
+    return path
+
 # build_pvdc_report
 # Основная функция - собирает итоговый отчет по Provider VDC:
 #   1. Получает список Provider VDC через cloudapi.
@@ -572,7 +883,7 @@ def aggregate_datastores(records):
 #   9. Рассчитывает итоговые ratio по CPU и memory.
 #   10. Возвращает единый JSON-совместимый словарь отчета.
 # Возвращает полностью подготовленный отчет, готовый к записи в JSON.
-def build_pvdc_report(client, pvdc_name=None):
+def build_pvdc_report(client, pvdc_name=None, dump_provider_storage_profile_xml_dir=None):
     provider_vdcs = client.get_json("/cloudapi/1.0.0/providerVdcs")
     values = provider_vdcs.get("values", [])
 
@@ -602,9 +913,75 @@ def build_pvdc_report(client, pvdc_name=None):
     cpu_converted = build_cpu_converted(cpu)
     memory_converted = build_memory_converted(mem)
 
-    storage_agg = aggregate_admin_org_vdc_storage_profiles(
+    tenant_storage_agg = aggregate_admin_org_vdc_storage_profiles(
         query_all_records(client, "adminOrgVdcStorageProfile")
     )
+
+    provider_storage_profile_details = []
+    provider_storage_profile_debug = []
+
+    for sp in admin.get("storage_profiles", []):
+        href = sp.get("href")
+        if not href:
+            continue
+
+        if href.startswith(client.base_url):
+            path = href[len(client.base_url):]
+        else:
+            path = href
+
+        xml_text = None
+        debug_entry = {
+            "storage_policy": sp.get("name"),
+            "provider_profile_id": sp.get("id"),
+            "provider_profile_href": href,
+            "request_path": path,
+            "xml_dump_file": None,
+            "parse_status": "unknown",
+            "error": None,
+        }
+
+        try:
+            xml_text = client.get_xml(path)
+            debug_entry["xml_dump_file"] = dump_provider_storage_profile_xml(
+                dump_provider_storage_profile_xml_dir,
+                sp.get("name"),
+                sp.get("id"),
+                xml_text,
+            )
+
+            parsed = parse_provider_vdc_storage_profile_xml(xml_text)
+            if not parsed.get("name"):
+                parsed["name"] = sp.get("name")
+            if not parsed.get("id"):
+                parsed["id"] = sp.get("id")
+            if not parsed.get("href"):
+                parsed["href"] = sp.get("href")
+
+            provider_storage_profile_details.append(parsed)
+            debug_entry["parse_status"] = "ok"
+        except Exception as exc:
+            provider_storage_profile_details.append({
+                "id": sp.get("id"),
+                "name": sp.get("name"),
+                "href": sp.get("href"),
+                "enabled": None,
+                "default": None,
+                "units": None,
+                "limit_mb": None,
+            })
+            debug_entry["parse_status"] = "error"
+            debug_entry["error"] = str(exc)
+
+        provider_storage_profile_debug.append(debug_entry)
+
+    provider_storage_agg = aggregate_provider_storage_profiles(
+        admin.get("storage_profiles", []),
+        provider_storage_profile_details
+    )
+
+    merged_storage_agg = merge_storage_views(tenant_storage_agg, provider_storage_agg)
+
     published_datastore_capacity_agg = aggregate_datastores(
         query_all_records(client, "datastore")
     )
@@ -616,6 +993,8 @@ def build_pvdc_report(client, pvdc_name=None):
             "verify_ssl": client.verify_ssl,
         },
         "provider_vdc": {
+            "name": admin.get("name"),
+            "id": admin.get("id"),
             "vim_server": pvdc.get("vimServer"),
             "nsxt_manager": pvdc.get("nsxTManager"),
         },
@@ -633,7 +1012,15 @@ def build_pvdc_report(client, pvdc_name=None):
             "memory_reservation_pressure": safe_float_div(mem.get("reserved"), mem.get("total")),
             "memory_usage_ratio": safe_float_div(mem.get("used"), mem.get("total")),
         },
-        "storage_by_policy": storage_agg,
+        "storage_by_policy": {
+            "tenant_view": tenant_storage_agg,
+            "provider_view": provider_storage_agg,
+            "merged_view": merged_storage_agg,
+        },
+#        "debug": {
+#            "provider_storage_profile_xml_dump_dir": dump_provider_storage_profile_xml_dir,
+#            "provider_storage_profiles": provider_storage_profile_debug,
+#        },
         "published_datastore_capacity": published_datastore_capacity_agg,
     }
 
@@ -645,9 +1032,10 @@ def build_pvdc_report(client, pvdc_name=None):
 #    --api-version: версия API VCD
 #    --pvdc-name: имя конкретного Provider VDC
 #    --output-file: путь к файлу для сохранения JSON-результата (опционально)
+#    ----dump-provider-storage-profile-xml-dir: путь к файлу для сохранения XML-результата (опционально)
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="VCD Provider VDC collector with aggregated storage policy usage"
+        description="VCD Provider VDC collector with tenant/provider storage policy aggregation and XML debug dump"
     )
     parser.add_argument("--vcd-url", required=True)
     parser.add_argument("--vcd-api-token", required=True)
@@ -655,6 +1043,12 @@ def parse_args():
     parser.add_argument("--api-version", required=False, default="39.1")
     parser.add_argument("--pvdc-name", required=False, default=None)
     parser.add_argument("--output-file", required=False, default=None)
+    parser.add_argument(
+        "--dump-provider-storage-profile-xml-dir",
+        required=False,
+        default=None,
+        help="Directory where raw Provider VDC storage profile XML responses will be dumped",
+    )
     return parser.parse_args()
 
 
@@ -670,7 +1064,11 @@ def main():
         )
         client.authenticate()
 
-        report = build_pvdc_report(client, pvdc_name=args.pvdc_name)
+        report = build_pvdc_report(
+            client,
+            pvdc_name=args.pvdc_name,
+            dump_provider_storage_profile_xml_dir=args.dump_provider_storage_profile_xml_dir,
+        )
 
         if args.output_file:
             try:
