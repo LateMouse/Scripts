@@ -994,7 +994,7 @@ def build_pvdc_report(client, pvdc_name=None, dump_provider_storage_profile_xml_
         },
         "provider_vdc": {
             "name": admin.get("name"),
-            "id": admin.get("id"),
+#            "id": admin.get("id"),
             "vim_server": pvdc.get("vimServer"),
             "nsxt_manager": pvdc.get("nsxTManager"),
         },
@@ -1013,8 +1013,8 @@ def build_pvdc_report(client, pvdc_name=None, dump_provider_storage_profile_xml_
             "memory_usage_ratio": safe_float_div(mem.get("used"), mem.get("total")),
         },
         "storage_by_policy": {
-            "tenant_view": tenant_storage_agg,
-            "provider_view": provider_storage_agg,
+#            "tenant_view": tenant_storage_agg,
+#            "provider_view": provider_storage_agg,
             "merged_view": merged_storage_agg,
         },
 #        "debug": {
