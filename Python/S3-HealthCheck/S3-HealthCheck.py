@@ -18,7 +18,7 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 import time
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import urllib3
 
 urllib3.disable_warnings()
@@ -85,7 +85,7 @@ class S3Monitor:
         # Итоговая структура, которую скрипт выведет в JSON.
         # status по умолчанию OK, но может стать WARNING/CRITICAL/UNKNOWN по итогам проверок.
         self.metrics = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone(timedelta(hours=3))).isoformat(),
             "endpoint": self.endpoint_url,
             "bucket": self.target_bucket,
             "status": "OK",
